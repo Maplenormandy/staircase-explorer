@@ -47,32 +47,35 @@ def main(filename, start, count, output):
             x = file['scales/x']['1.0'][:]
             y = file['scales/y']['1.0'][:]
             n = file['tasks/n'][index,:,:]
+            T = file['tasks/T'][index,:,:]
             psi = file['tasks/psi'][index,:,:]
-            q = file['tasks/q'][index,:,:]
 
-            psibar = np.average(psi, axis=1)
-            psitilde = psi-psibar[:,np.newaxis]
+            psibar = np.average(psi, axis=0)
+            psitilde = psi-psibar[np.newaxis,:]
             psimax = np.max(np.abs(psitilde))
 
-            nbar = np.average(n, axis=1)
-            ntilde = n-nbar[:,np.newaxis]
+            Tbar = np.average(T, axis=0)
+            Ttilde = T-Tbar[np.newaxis,:]
+            Tmax = np.max(np.abs(Ttilde))
+
+            nbar = np.average(n, axis=0)
+            ntilde = n-nbar[np.newaxis,:]
             nmax = np.max(np.abs(ntilde))
 
-            qbar = np.average(q, axis=1)
-            qtilde = q-qbar[:,np.newaxis]
-            qmax = np.max(np.abs(qtilde))
-
-            cf = ax[0].pcolormesh(y, x, psitilde, cmap='viridis', vmin=-psimax, vmax=psimax)
+            cf = ax[0].pcolormesh(x, y, ntilde.T, cmap='viridis', vmin=-nmax, vmax=nmax)
+            #cf = ax[0].pcolormesh(y, x, n, cmap='viridis')
             fig.colorbar(cf, ax=ax[0])
-            #ax[0].contour(x, y, psi.T, colors=['black'], linewidths=0.5)
+            ax[0].contour(x, y, psi.T, colors=['black'], linewidths=0.5)
             ax[0].set_aspect('equal')
 
-            cf = ax[1].pcolormesh(y, x, qtilde, cmap='viridis', vmin=-qmax, vmax=qmax)
+            cf = ax[1].pcolormesh(x, y, Ttilde.T, cmap='viridis', vmin=-Tmax, vmax=Tmax)
             fig.colorbar(cf, ax=ax[1])
+            ax[1].contour(x, y, psitilde.T, colors=['black'], linewidths=0.5)
             ax[1].set_aspect('equal')
 
-            ax[2].plot(qbar, x, label='qbar')
-            ax[2].plot(psibar, x, label='psibar')
+            ax[2].plot(nbar, y, label='nbar')
+            ax[2].plot(Tbar, y, label='Tbar')
+            #ax[2].plot(psibar, x, label='psibar')
             ax[2].legend()
 
             # Add time title

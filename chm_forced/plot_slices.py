@@ -29,6 +29,7 @@ def main(filename, start, count, output):
     title_func = lambda sim_time: 't = {:.3f}'.format(sim_time)
     savename_func = lambda write: 'write_{:06}.png'.format(write)
 
+
     # Plot writes
     with h5py.File(filename, mode='r') as file:
         for index in range(start, start+count):
@@ -39,14 +40,12 @@ def main(filename, start, count, output):
             if path.exists(str(savepath)):
                 continue
 
-            fig = plt.figure(figsize=(4.8*2.7,4.8))
-            gs = mpl.gridspec.GridSpec(1, 3, width_ratios=[3,3,1])
-            ax = np.array(list(map(plt.subplot, gs)))
+            fig, ax = plt.subplots(2,3, sharey='row', figsize=(4.8*2.7, 4.8),
+                                   gridspec_kw={'width_ratios':[3,3,1], 'height_ratios':[24,1]})
 
             # Plot data
             x = file['scales/x']['1.0'][:]
             y = file['scales/y']['1.0'][:]
-            n = file['tasks/n'][index,:,:]
             psi = file['tasks/psi'][index,:,:]
             q = file['tasks/q'][index,:,:]
 
@@ -54,26 +53,22 @@ def main(filename, start, count, output):
             psitilde = psi-psibar[:,np.newaxis]
             psimax = np.max(np.abs(psitilde))
 
-            nbar = np.average(n, axis=1)
-            ntilde = n-nbar[:,np.newaxis]
-            nmax = np.max(np.abs(ntilde))
-
             qbar = np.average(q, axis=1)
             qtilde = q-qbar[:,np.newaxis]
             qmax = np.max(np.abs(qtilde))
 
-            cf = ax[0].pcolormesh(y, x, psitilde, cmap='viridis', vmin=-psimax, vmax=psimax)
-            fig.colorbar(cf, ax=ax[0])
+            cf = ax[0,0].pcolormesh(y, x, psitilde, cmap='viridis', vmin=-psimax, vmax=psimax)
+            ax[0,0].set_aspect('equal')
+            fig.colorbar(cf, cax=ax[1,0], orientation='horizontal')
             #ax[0].contour(x, y, psi.T, colors=['black'], linewidths=0.5)
-            ax[0].set_aspect('equal')
 
-            cf = ax[1].pcolormesh(y, x, qtilde, cmap='viridis', vmin=-qmax, vmax=qmax)
-            fig.colorbar(cf, ax=ax[1])
-            ax[1].set_aspect('equal')
+            cf = ax[0,1].pcolormesh(y, x, qtilde, cmap='viridis', vmin=-qmax, vmax=qmax)
+            ax[0,1].set_aspect('equal')
+            fig.colorbar(cf, cax=ax[1,1], orientation='horizontal')
 
-            ax[2].plot(qbar, x, label='qbar')
-            ax[2].plot(psibar, x, label='psibar')
-            ax[2].legend()
+            ax[0,2].plot(qbar, x, label='qbar')
+            ax[0,2].plot(psibar, x, label='psibar')
+            ax[0,2].legend(loc='lower right')
 
             # Add time title
             title = title_func(file['scales/sim_time'][index])
