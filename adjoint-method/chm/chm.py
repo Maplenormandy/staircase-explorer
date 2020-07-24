@@ -44,11 +44,11 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 
 # Parameters
-Lx, Ly = (30., 30.)
-Nx, Ny = (512, 512)
+Lx, Ly = (20., 20.)
+Nx, Ny = (256, 256)
 Beta = 1.0
-Viscosity = 1e-4
-Friction = 1e-4
+Viscosity = 1e-3
+Friction = 1e-3
 
 # Create bases and domain
 x_basis = de.Fourier('x', Nx, interval=(-Lx/2, Lx/2), dealias=3/2)
@@ -62,40 +62,79 @@ k2_global = kx_global**2+ky_global**2
 
 # Set up random forcing
 amp_random = ky_global*(1+k2_global)*np.exp(-k2_global/2)
-amp_total = np.sum(amp_random**2)*2
-# On average, forcing should be at constant energy density
+amp_total = np.sum(amp_random**2)
+# On average, forcing should be at constant density
 amp_random = amp_random / amp_total * Lx * Ly
 
-rng = np.random.default_rng()
+rng = np.random.default_rng(seed=42*rank)
 
-def forcing(deltaT):
+forced_r = False
+forced_i = False
+
+def forcing_r(t, deltaT):
+    global forced_r
     cshape = domain.dist.coeff_layout.local_shape(scales=1)
     cslice = domain.dist.coeff_layout.slices(scales=1)
 
-    noise_r = rng.standard_normal(cshape)
-    noise_i = rng.standard_normal(cshape)
-    force = (noise_r+1j*noise_i)*amp_random[cslice]*0.1
+    if t < 19.02:
+        return np.zeros(cshape)
+    elif not forced_r:
+        forced_r = True
+        ny_grid, nx_grid = np.meshgrid(ny_global, nx_global)
+        delta = np.logical_and(ny_grid[cslice]==10, nx_grid[cslice]==0)
 
-    return force/np.sqrt(deltaT)
+        force = delta / deltaT
 
-forcing_func = operators.GeneralFunction(domain, 'c', forcing, args=[])
+        return force
+    else:
+        return np.zeros(cshape)
+
+def forcing_i(t, deltaT):
+    global forced_i
+    cshape = domain.dist.coeff_layout.local_shape(scales=1)
+    cslice = domain.dist.coeff_layout.slices(scales=1)
+
+    if t < 19.02:
+        return np.zeros(cshape)
+    elif not forced_i:
+        forced_i = True
+        ny_grid, nx_grid = np.meshgrid(ny_global, nx_global)
+        delta = np.logical_and(ny_grid[cslice]==10, nx_grid[cslice]==0)
+
+        force = 1j * delta / deltaT
+
+        return force
+    else:
+        return np.zeros(cshape)
+
+forcing_func_r = operators.GeneralFunction(domain, 'c', forcing_r, args=[])
+forcing_func_i = operators.GeneralFunction(domain, 'c', forcing_i, args=[])
 
 # Set up problem equations
-problem = de.IVP(domain, variables=['psi', 'vx', 'vy', 'q'])
+problem = de.IVP(domain, variables=['psi', 'vx', 'vy', 'q', 'psi_r', 'q_r', 'psi_i', 'q_i'])
 problem.parameters['Bt'] = Beta
 problem.parameters['Mu'] = Viscosity
 problem.parameters['Al'] = Friction
 problem.parameters['Ly'] = Ly
 problem.parameters['Lx'] = Lx
-problem.parameters['forcing_func'] = forcing_func
+problem.parameters['forcing_func_r'] = forcing_func_r
+problem.parameters['forcing_func_i'] = forcing_func_i
 problem.substitutions['Lap(A)'] = "dx(dx(A)) + dy(dy(A))"
+problem.substitutions['pb(A,B)'] = "dx(A)*dy(B) - dy(A)*dx(B)"
 
-problem.add_equation("dt(q) + Mu*Lap(Lap(q)) + Al*q - Bt*dy(psi) = -(vx*dx(q) + vy*dy(q)) + forcing_func")
+problem.add_equation("dt(q) + Mu*Lap(Lap(q)) + Al*q - Bt*dy(psi) = -(vx*dx(q) + vy*dy(q))")
 
 problem.add_equation("q - Lap(psi) + psi - integ(psi,'y')/Ly = 0", condition="(nx!=0) or (ny!=0)")
 problem.add_equation("psi = 0", condition="(nx==0) and (ny==0)")
 problem.add_equation("vy - dx(psi) = 0")
 problem.add_equation("vx + dy(psi) = 0")
+
+problem.add_equation("dt(q_r) + Mu*Lap(Lap(q_r)) + Al*q_r - Bt*dy(psi_r) = -(vx*dx(q_r) + vy*dy(q_r)) - pb(psi_r,q) + forcing_func_r")
+problem.add_equation("q_r - Lap(psi_r) + psi_r - integ(psi_r,'y')/Ly = 0", condition="(nx!=0) or (ny!=0)")
+problem.add_equation("psi_r = 0", condition="(nx==0) and (ny==0)")
+problem.add_equation("dt(q_i) + Mu*Lap(Lap(q_i)) + Al*q_i - Bt*dy(psi_i) = -(vx*dx(q_i) + vy*dy(q_i)) - pb(psi_i,q) + forcing_func_i")
+problem.add_equation("q_i - Lap(psi_i) + psi_i - integ(psi_i,'y')/Ly = 0", condition="(nx!=0) or (ny!=0)")
+problem.add_equation("psi_i = 0", condition="(nx==0) and (ny==0)")
 
 
 
@@ -106,7 +145,7 @@ logger.info('Solver built')
 timestep = 2e-5
 max_timestep = 0.2
 #snapshotStep = 0.0005
-snapshotStep = 0.2
+snapshotStep = 0.02
 
 
 # Initial conditions or restart
@@ -118,16 +157,15 @@ if not pathlib.Path('restart.h5').exists():
     cshape = domain.dist.coeff_layout.local_shape(scales=1)
     cslice = domain.dist.coeff_layout.slices(scales=1)
 
-    noise_r = rng.standard_normal(cshape)
-    noise_i = rng.standard_normal(cshape)
+    noise = rng.standard_normal(cshape)
 
-    base = (noise_r + 1j*noise_i)*amp_random[cslice]*0.2
+    base = noise*amp_random[cslice]*0.25
 
     q['c'] = base
 
     # Timestepping and output
     dt = timestep
-    stop_sim_time = 600
+    stop_sim_time = 20.0
     fh_mode = 'overwrite'
 
 else:
@@ -147,7 +185,7 @@ snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=snapshotStep, 
 snapshots.add_system(solver.state)
 
 # CFL
-CFL = flow_tools.CFL(solver, initial_dt=dt, cadence=10, safety=0.5,
+CFL = flow_tools.CFL(solver, initial_dt=dt, cadence=10, safety=0.7,
                      max_change=1.5, min_change=0.1, max_dt=max_timestep, threshold=0.05)
 CFL.add_velocities(('vx', 'vy'))
 
@@ -165,9 +203,10 @@ try:
     start_time = time.time()
     while solver.proceed:
         dt = CFL.compute_dt()
-        forcing_func.args = [dt]
+        forcing_func_r.args = [solver.sim_time, dt]
+        forcing_func_i.args = [solver.sim_time, dt]
         dt = solver.step(dt)
-        if (solver.iteration-2) % output_cadence == 0:
+        if (solver.iteration-1) % output_cadence == 0:
             next_time = time.time()
             logger.info('Iteration: %i, Time: %e, dt: %e' %(solver.iteration, solver.sim_time, dt))
             logger.info('Average timestep (ms): %f' % ((next_time-curr_time) * 1000.0 / output_cadence))
